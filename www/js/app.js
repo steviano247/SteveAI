@@ -249,12 +249,57 @@
     ['💬', 'Smart Chat', 'Ask me anything', 'linear-gradient(135deg,#1e90ff,#2b57ff)', 'Hi SteveAI! Tell me something interesting I probably do not know.'],
     ['⌨️', 'Code Assistant', 'Write & debug code', 'linear-gradient(135deg,#a24bff,#6a2cff)', 'Help me write a clean JavaScript function that debounces another function, and explain how it works.'],
     ['📈', 'Data & Analysis', 'Insights & numbers', 'linear-gradient(135deg,#27d17f,#0a9b5a)', 'Explain how to analyse a sales dataset step by step: what to clean, what to calculate and which charts to make.'],
-    ['💡', 'Creative Ideas', 'Brainstorm anything', 'linear-gradient(135deg,#ffb41f,#ff7a00)', 'Give me 10 creative business ideas that a young engineer in Nigeria can start with little capital.'],
+    ['🎨', 'Image Studio', 'Create images from words', 'linear-gradient(135deg,#ffb41f,#ff7a00)', 'Generate an image of a futuristic Lagos skyline at sunset, ultra detailed, cinematic lighting'],
     ['🌐', 'Web & Research', 'Summaries & facts', 'linear-gradient(135deg,#2aa8ff,#1b63ff)', 'Create a clear beginner roadmap for learning IoT and embedded systems, with free resources.'],
     ['🚀', 'Task Automation', 'Plans & workflows', 'linear-gradient(135deg,#34d36b,#0aa04f)', 'Help me automate a weekly report using Google Sheets and Apps Script. Give the steps and code.']
   ];
   function curChat() { return S.chats.find(c => c.id === S.cur) || null; }
-  function saveChats() { S.chats = S.chats.slice(0, 40); LS.set('chats', S.chats); LS.set('cur', S.cur); }
+  /* generated pictures are kept only for the newest few so the phone's storage never fills up */
+  function pruneImgs(keep) {
+    let n = 0;
+    S.chats.forEach(c => c.messages.forEach(m => { if (m.img) { n++; } }));
+    let drop = Math.max(0, n - keep);
+    for (let i = S.chats.length - 1; i >= 0 && drop > 0; i--) {
+      const ms = S.chats[i].messages;
+      for (let j = 0; j < ms.length && drop > 0; j++) if (ms[j].img) { delete ms[j].img; ms[j].imgGone = true; drop--; }
+    }
+  }
+  function saveChats() {
+    S.chats = S.chats.slice(0, 40); pruneImgs(6);
+    try { localStorage.setItem('sai_chats', JSON.stringify(S.chats)); }
+    catch (e) { pruneImgs(0); try { localStorage.setItem('sai_chats', JSON.stringify(S.chats)); } catch (_) { } }
+    LS.set('cur', S.cur);
+  }
+  const IMG_RE = /^\/(image|imagine|img|draw)\b|\b(generate|create|make|draw|design|paint|illustrate|render|produce|sketch|imagine|give me|show me|i want|i need|get me)\b[^.?!\n]{0,80}?\b(images?|pictures?|photos?|pics?|illustrations?|logos?|posters?|wallpapers?|artworks?|drawings?|paintings?|icons?|banners?|flyers?|thumbnails?|avatars?|portraits?|stickers?|cartoons?|mockups?|memes?|graphics?)\b|^\s*(please\s+)?(draw|sketch|paint|illustrate|imagine)\b/i;
+  const looksLikeImage = t => IMG_RE.test(t) && !/\b(code|script|python|javascript|function|program|snippet)\b/i.test(t) || /^\/(image|imagine|img|draw)\b/i.test(t);
+  function shrinkImg(src, max, q) {
+    return new Promise(res => {
+      const im = new Image();
+      im.onload = () => {
+        try {
+          const k = Math.min(1, max / Math.max(im.width, im.height));
+          const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+          const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0, c.width, c.height);
+          res(c.toDataURL('image/jpeg', q));
+        } catch (e) { res(src); }
+      };
+      im.onerror = () => res(src); im.src = src;
+    });
+  }
+  async function saveImage(src) {
+    const name = 'SteveAI-' + Date.now() + '.jpg';
+    const FS = plugin('Filesystem'), SH = plugin('Share');
+    try {
+      if (FS && SH) {
+        const w = await FS.writeFile({ path: name, data: src.split(',')[1], directory: 'CACHE' });
+        await SH.share({ title: 'SteveAI image', url: w.uri, dialogTitle: 'Save or share image' });
+        return;
+      }
+      const blob = await (await fetch(src)).blob(); const file = new File([blob], name, { type: blob.type });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'SteveAI image' }); return; }
+      const a = document.createElement('a'); a.href = src; a.download = name; document.body.appendChild(a); a.click(); a.remove(); toast('Saved ✓');
+    } catch (e) { if (e && e.name === 'AbortError') return; toast('Could not save the image'); }
+  }
   function newChat() { S.cur = null; saveChats(); renderMsgs(); renderHist(); }
   function initChat() { paintUser(); if (!curChat()) S.cur = null; renderMsgs(); renderHist(); }
 
@@ -276,7 +321,8 @@
     if (m.role === 'user') { d.className = 'm u'; d.innerHTML = '<div class="b"></div>'; d.firstChild.textContent = m.text; }
     else {
       d.className = 'm a';
-      d.innerHTML = `<img class="av" src="assets/robot.png" alt=""><div class="col"><div class="b">${md(m.text)}</div><div class="acts"><button data-copymsg>⧉ Copy</button></div></div>`;
+      const pic = m.img ? `<div class="gen"><img src="${m.img}" alt="Generated image"><div class="genacts"><button data-saveimg>⬇ Save / Share</button></div></div>` : (m.imgGone ? '<div class="genold">🖼️ Image not stored on this device</div>' : '');
+      d.innerHTML = `<img class="av" src="assets/robot.png" alt=""><div class="col"><div class="b">${pic}${md(m.text)}</div><div class="acts"><button data-copymsg>⧉ Copy</button></div></div>`;
       d._text = m.text;
     }
     return d;
@@ -302,10 +348,10 @@
   function autoGrow() { const t = $('#inp'); t.style.height = 'auto'; t.style.height = Math.min(140, t.scrollHeight) + 'px'; }
   $('#inp').addEventListener('input', autoGrow);
 
-  function typingEl() {
+  function typingEl(img) {
     const d = document.createElement('div'); d.className = 'm a'; d.id = 'typing';
-    d.innerHTML = '<img class="av" src="assets/robot.png" alt=""><div class="col"><div class="typing"><div class="d"><i></i><i></i><i></i></div><span id="tlabel">SteveAI is thinking…</span></div></div>';
-    const labels = ['SteveAI is thinking…', 'Working on your answer…', 'Almost there…']; let i = 0;
+    d.innerHTML = `<img class="av" src="assets/robot.png" alt=""><div class="col"><div class="typing"><div class="d"><i></i><i></i><i></i></div><span id="tlabel">${img ? 'Creating your image… 🎨' : 'SteveAI is thinking…'}</span></div></div>`;
+    const labels = img ? ['Creating your image… 🎨', 'Adding the details…', 'Polishing the final look…', 'Almost ready…'] : ['SteveAI is thinking…', 'Working on your answer…', 'Almost there…']; let i = 0;
     d._iv = setInterval(() => { i = (i + 1) % labels.length; const l = $('#tlabel'); if (l) l.textContent = labels[i]; }, 3500);
     return d;
   }
@@ -325,7 +371,7 @@
     inp.value = ''; autoGrow();
     const box = $('#msgs'); if ($('.empty', box)) box.innerHTML = '';
     box.appendChild(msgEl({ role: 'user', text }));
-    const ty = typingEl(); box.appendChild(ty); box.scrollTop = box.scrollHeight;
+    const ty = typingEl(looksLikeImage(text)); box.appendChild(ty); box.scrollTop = box.scrollHeight;
     S.busy = true; $('#btnSend').disabled = true; renderHist();
 
     const stop = () => { clearInterval(ty._iv); ty.remove(); S.busy = false; $('#btnSend').disabled = false; };
@@ -333,9 +379,11 @@
       const r = await api('chat', { messages: c.messages.map(m => ({ role: m.role, text: m.text })) });
       stop();
       if (r.ok) {
-        c.messages.push({ role: 'assistant', text: r.text }); saveChats();
+        const am = { role: 'assistant', text: r.text };
+        if (r.image && r.image.data) am.img = await shrinkImg('data:' + (r.image.mime || 'image/png') + ';base64,' + r.image.data, 1280, 0.88);
+        c.messages.push(am); saveChats();
         S.user = Object.assign(S.user, { plan: r.plan, limit: r.limit, used: r.used, resetAt: r.resetAt }); saveAuth(); paintUser();
-        box.appendChild(msgEl({ role: 'assistant', text: r.text })); box.scrollTop = box.scrollHeight;
+        box.appendChild(msgEl(am)); box.scrollTop = box.scrollHeight;
       } else if (r.error === 'LIMIT') {
         c.messages.pop(); saveChats();
         S.user = Object.assign(S.user, { plan: r.plan, limit: r.limit, used: r.used, resetAt: r.resetAt }); saveAuth(); paintUser();
@@ -364,6 +412,8 @@
   $('#msgs').addEventListener('click', e => {
     const cb = e.target.closest('[data-copy]');
     if (cb) { copy(cb.closest('.code').querySelector('code').textContent); return; }
+    const si = e.target.closest('[data-saveimg]');
+    if (si) { saveImage(si.closest('.gen').querySelector('img').src); return; }
     const cm = e.target.closest('[data-copymsg]');
     if (cm) { copy(cm.closest('.m')._text || ''); return; }
     const a = e.target.closest('a[data-ext]');
