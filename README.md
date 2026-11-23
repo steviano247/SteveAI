@@ -15,13 +15,19 @@ signing/steveai.keystore -> default signing key (see "Signing")
 1. Create a new **Google Sheet** (name it "SteveAI Database").
 2. **Extensions → Apps Script**. Delete the sample code, paste all of `apps-script/Code.gs`.
    (Project Settings → tick "Show appsscript.json" and paste `apps-script/appsscript.json` too.)
-3. Get Gemini keys from https://aistudio.google.com/apikey. After step 4, open the **ApiKeys** sheet and paste **one key per row in column A** (as many as you like).
+3. SteveAI uses **only Google Gemini and xAI Grok**. Get Gemini keys (start with `AIza…`) from https://aistudio.google.com/apikey and/or Grok keys (start with `xai-`) from https://console.x.ai. Keys from any other provider are ignored. After step 4, open the **ApiKeys** sheet and paste **one key per row in column A** (as many as you like).
    The app rotates between them, rests a key for 60 s when it hits a rate limit, and marks a rejected key `INVALID`. Set a row's status to `OFF` to pause it.
    (Optional fallback: Script property `GEMINI_API_KEY`.) Keep this Google Sheet private — it holds your keys.
 4. Select function **`setup`** → Run → authorise. It creates the sheets **Users, Payments, Config, ApiKeys**.
 5. **Deploy → New deployment → Web app** → Execute as: **Me** → Who has access: **Anyone** → Deploy.
    Copy the Web App URL (ends with `/exec`).
    After any later code change use **Deploy → Manage deployments → Edit → New version**.
+
+### Attachments (📎 button)
+Next to the message box users can take a photo, pick an image, or add a document (up to 4 per message).
+- **Images and PDFs** are sent to Gemini (Grok sees images too, but cannot open PDFs).
+- **Word, PowerPoint, Excel and text/code files** are converted to text on the phone, so they work with both engines.
+- After changing `Code.gs`, redeploy: **Deploy → Manage deployments → Edit → New version**.
 
 ## 2) Connect the app
 Edit `www/js/config.js`:

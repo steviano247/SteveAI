@@ -69,7 +69,20 @@
     </div>
     <div id="msgs"></div>
     <div class="composer">
+      <div id="atts" class="atts hidden"></div>
+      <div class="attmenu hidden" id="attMenu">
+        <button data-att="camera"><span class="ai c1">📷</span>Camera</button>
+        <button data-att="image"><span class="ai c2">🖼️</span>Photo / Image</button>
+        <button data-att="doc"><span class="ai c3">📄</span>Document</button>
+      </div>
+      <input type="file" id="fCam" accept="image/*" capture="environment" hidden>
+      <input type="file" id="fImg" accept="image/*" multiple hidden>
+      <input type="file" id="fDoc" multiple hidden
+        accept=".pdf,.docx,.pptx,.xlsx,.txt,.md,.csv,.tsv,.json,.xml,.html,.htm,.css,.js,.ts,.py,.java,.c,.cpp,.cs,.php,.rb,.go,.rs,.sql,.yml,.yaml,.log,.ini,.sh,.kt,.swift,text/*,application/pdf">
       <div class="cbox">
+        <button class="attach" id="btnAttach" type="button" aria-label="Attach a file or take a photo">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.1 12.2 20.3a5.5 5.5 0 0 1-7.8-7.8l9.2-9.2a3.7 3.7 0 0 1 5.2 5.2l-9.2 9.2a1.8 1.8 0 0 1-2.6-2.6l8.5-8.5"/></svg>
+        </button>
         <textarea id="inp" rows="1" placeholder="Ask SteveAI anything…" maxlength="6000"></textarea>
         <button class="send" id="btnSend" aria-label="Send">➤</button>
       </div>
