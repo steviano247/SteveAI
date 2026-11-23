@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#050f33">
+<title>SteveAI</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- 5-second splash (your artwork) -->
+  <section id="splash"><div class="splash-bar"><i></i></div></section>
+
+  <!-- Onboarding intro -->
+  <section id="intro" class="screen hidden">
+    <div class="intro-slides">
+      <div class="slide on"><img class="big" src="assets/robot.png" alt=""><h2>Meet SteveAI</h2><p>Your smart, friendly assistant. Ask anything, any time.</p></div>
+      <div class="slide"><div class="big">💻</div><h2>Code, data &amp; research</h2><p>Debug code, analyse data, summarise topics and plan your work faster.</p></div>
+      <div class="slide"><div class="big">✨</div><h2>Think. Ask. Create. Achieve.</h2><p>Start free with 5 prompts every 5 hours. Upgrade to Go or Pro whenever you need more.</p></div>
+    </div>
+    <div class="foot">
+      <div class="dots"><i class="on"></i><i></i><i></i></div>
+      <button class="btn primary" id="introNext">Next</button>
+      <button class="btn ghost" id="introSkip">Skip</button>
+    </div>
+  </section>
+
+  <!-- Sign up / Log in -->
+  <section id="auth" class="screen hidden">
+    <div class="scroll">
+      <div class="hero">
+        <img src="assets/robot.png" alt="">
+        <h1>Welcome to Steve<b>AI</b></h1>
+        <p id="authSub">Create your free account in seconds</p>
+      </div>
+      <div class="seg"><button id="tabUp" class="on">Sign up</button><button id="tabIn">Log in</button></div>
+
+      <form id="formUp" autocomplete="on">
+        <div class="field"><span class="ic">✉️</span><input id="suEmail" type="email" inputmode="email" placeholder="Gmail address (name@gmail.com)" autocomplete="email"></div>
+        <div class="field"><span class="ic">👤</span><input id="suUser" type="text" placeholder="Choose a username" autocomplete="username" maxlength="20"></div>
+        <div class="field"><span class="ic">🔒</span><input id="suPass" type="password" placeholder="Create password (min 6 characters)" autocomplete="new-password"><button type="button" class="eye" data-eye>👁</button></div>
+        <div class="field"><span class="ic">🎁</span><input id="suInv" type="text" placeholder="Invite code (optional)" autocapitalize="characters"></div>
+        <label class="keep"><input type="checkbox" id="suKeep" checked><span>Keep me signed in</span></label>
+        <div class="err" id="errUp"></div>
+        <button class="btn gold" id="btnUp" type="submit">Create free account</button>
+        <p class="fine">You start on the <b>Free</b> plan: 5 prompts every 5 hours. Upgrade any time from Settings ⚙️.</p>
+      </form>
+
+      <form id="formIn" class="hidden" autocomplete="on">
+        <div class="field"><span class="ic">✉️</span><input id="liId" type="text" placeholder="Gmail or username" autocomplete="username" autocapitalize="none"></div>
+        <div class="field"><span class="ic">🔒</span><input id="liPass" type="password" placeholder="Password" autocomplete="current-password"><button type="button" class="eye" data-eye>👁</button></div>
+        <label class="keep"><input type="checkbox" id="liKeep" checked><span>Keep me signed in</span></label>
+        <div class="err" id="errIn"></div>
+        <button class="btn primary" id="btnIn" type="submit">Log in</button>
+      </form>
+    </div>
+    <div class="powered">Powered by <b>STEVEXA</b></div>
+  </section>
+
+  <!-- Chat -->
+  <section id="chat" class="screen hidden">
+    <div class="top">
+      <button class="ib" id="btnMenu" aria-label="Menu">☰</button>
+      <div class="brand"><img src="assets/icon-192.png" alt=""><span>Steve<b>AI</b></span></div>
+      <button class="pill" id="pill">⚡ <span id="pillTxt">5 left</span></button>
+      <button class="ib" id="btnSet" aria-label="Settings">⚙️</button>
+    </div>
+    <div id="msgs"></div>
+    <div class="composer">
+      <div class="cbox">
+        <textarea id="inp" rows="1" placeholder="Ask SteveAI anything…" maxlength="6000"></textarea>
+        <button class="send" id="btnSend" aria-label="Send">➤</button>
+      </div>
+      <div class="hint">SteveAI can make mistakes. Check important info.</div>
+    </div>
+  </section>
+
+  <!-- Drawer -->
+  <div class="scrim" id="scrim"></div>
+  <aside id="drawer">
+    <button class="btn gold" id="btnNew">＋ New chat</button>
+    <h3>Recent chats</h3>
+    <div id="hist"></div>
+    <div class="dfoot"><div class="avatar" id="dAv">S</div><div style="flex:1;min-width:0"><b id="dName">User</b><div class="mut" style="font-size:12px" id="dPlan">Free plan</div></div></div>
+  </aside>
+
+  <!-- Settings sheet -->
+  <div class="sheet" id="settings">
+    <div class="grab"></div>
+    <div class="ph"><h2>Settings</h2><button class="ib" data-close="settings">✕</button></div>
+    <div class="card">
+      <div class="who"><div class="avatar" id="sAv">S</div>
+        <div style="flex:1;min-width:0"><b id="sName">User</b><small id="sMail" style="word-break:break-all">email</small></div>
+        <span class="badge" id="sBadge">Free</span></div>
+      <div class="bar"><i id="sBar" style="width:0"></i></div>
+      <small class="mut" id="sUse">–</small>
+    </div>
+    <button class="btn gold" id="btnUpgrade" style="margin-bottom:14px">⭐ Upgrade plan</button>
+    <div class="card" style="padding:6px 14px">
+      <button class="row" id="rowInvite"><span class="ri">🎟️</span><div><b>Your invite code</b><small id="sInvite">–</small></div><span class="go">⧉</span></button>
+      <button class="row" id="rowUpdate"><span class="ri">⬇️</span><div><b>Check for updates</b><small id="sVer">Version</small></div><span class="go">›</span></button>
+      <button class="row" id="rowRefresh"><span class="ri">🔄</span><div><b>Refresh my plan</b><small>After payment, tap to sync</small></div><span class="go">›</span></button>
+      <button class="row" id="rowClear"><span class="ri">🧹</span><div><b>Clear chat history</b><small>This device only</small></div><span class="go">›</span></button>
+    </div>
+    <button class="btn danger" id="btnOut">Log out</button>
+    <p class="fine">SteveAI™ · Powered by STEVEXA</p>
+  </div>
+
+  <!-- Upgrade page -->
+  <div class="page" id="upgrade">
+    <div class="ph"><button class="ib" data-close="upgrade">‹</button><h2>Choose your plan</h2></div>
+    <div class="plans" id="plans"></div>
+    <div id="payBox"></div>
+  </div>
+
+  <!-- Modal + toast -->
+  <div id="modal"><div class="mbox"><div class="mi" id="mIcon">ℹ️</div><h3 id="mTitle"></h3><p id="mText"></p><div class="btns" id="mBtns"></div></div></div>
+  <div id="toast"></div>
+</div>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

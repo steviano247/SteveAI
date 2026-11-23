@@ -1,0 +1,471 @@
+/* SteveAI app — powered by STEVEXA */
+(function () {
+  'use strict';
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const C = window.CONFIG;
+  const LS = {
+    get(k, d) { try { const v = localStorage.getItem('sai_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem('sai_' + k, JSON.stringify(v)); } catch (e) { } },
+    del(k) { try { localStorage.removeItem('sai_' + k); } catch (e) { } }
+  };
+
+  const SESS = {
+    get(k, d) { try { const v = sessionStorage.getItem('sai_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { sessionStorage.setItem('sai_' + k, JSON.stringify(v)); } catch (e) { } },
+    del(k) { try { sessionStorage.removeItem('sai_' + k); } catch (e) { } }
+  };
+  const keptToken = LS.get('token', null);
+  const S = {
+    keep: keptToken !== null,
+    token: keptToken || SESS.get('token', null), user: keptToken ? LS.get('user', null) : SESS.get('user', null), cfg: LS.get('cfg', null),
+    chats: LS.get('chats', []), cur: LS.get('cur', null), busy: false, plan: null, pendingPlan: LS.get('pending', null)
+  };
+
+  /* ---------------- helpers ---------------- */
+  const isNative = () => !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
+  const plugin = n => (window.Capacitor && Capacitor.Plugins && Capacitor.Plugins[n]) || null;
+
+  function toast(msg, ms) {
+    const t = $('#toast'); t.textContent = msg; t.classList.add('on');
+    clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), ms || 2400);
+  }
+  function modal(o) {
+    $('#mIcon').textContent = o.icon || 'ℹ️'; $('#mTitle').textContent = o.title || ''; $('#mText').textContent = o.text || '';
+    const b = $('#mBtns'); b.innerHTML = '';
+    (o.buttons || [{ label: 'OK' }]).forEach(x => {
+      const el = document.createElement('button'); el.className = 'btn ' + (x.cls || 'primary'); el.textContent = x.label;
+      el.onclick = () => { closeModal(); x.fn && x.fn(); }; b.appendChild(el);
+    });
+    $('#modal').classList.add('on');
+  }
+  function closeModal() { $('#modal').classList.remove('on'); }
+  function openExternal(url) {
+    const B = plugin('Browser');
+    if (B && B.open) { B.open({ url }).catch(() => window.open(url, '_blank')); } else window.open(url, '_blank');
+  }
+  async function copy(text) {
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); } catch (_) { } t.remove(); }
+    toast('Copied ✓');
+  }
+  function fmtLeft(ms) {
+    const m = Math.max(1, Math.ceil(ms / 60000)); const h = Math.floor(m / 60);
+    return h ? h + 'h ' + (m % 60) + 'm' : m + 'm';
+  }
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+  async function api(action, data) {
+    if (!C.API_URL || C.API_URL.indexOf('PASTE_') === 0) throw new Error('App is not connected yet: set API_URL in www/js/config.js');
+    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 150000);
+    try {
+      const r = await fetch(C.API_URL, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(Object.assign({ action, token: S.token }, data || {})), signal: ctl.signal, redirect: 'follow'
+      });
+      return await r.json();
+    } catch (e) {
+      if (e.name === 'AbortError') throw new Error('The request took too long. Please try again.');
+      if (/not connected/.test(e.message)) throw e;
+      throw new Error('Network problem. Check your internet and try again.');
+    } finally { clearTimeout(to); }
+  }
+
+  /* ---------------- markdown ---------------- */
+  function inline(s) {
+    s = esc(s);
+    s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+    s = s.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+    s = s.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<i>$2</i>');
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" data-ext="1">$1</a>');
+    return s;
+  }
+  function blocks(t) {
+    const lines = t.split('\n'); let out = '', list = null, para = [];
+    const flushP = () => { if (para.length) { out += '<p>' + para.map(inline).join('<br>') + '</p>'; para = []; } };
+    const flushL = () => { if (list) { out += '</' + list + '>'; list = null; } };
+    for (const ln of lines) {
+      let m;
+      if (!ln.trim()) { flushP(); flushL(); continue; }
+      if ((m = ln.match(/^(#{1,3})\s+(.*)/))) { flushP(); flushL(); out += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`; continue; }
+      if ((m = ln.match(/^\s*[-*•]\s+(.*)/))) { flushP(); if (list !== 'ul') { flushL(); out += '<ul>'; list = 'ul'; } out += '<li>' + inline(m[1]) + '</li>'; continue; }
+      if ((m = ln.match(/^\s*\d+[.)]\s+(.*)/))) { flushP(); if (list !== 'ol') { flushL(); out += '<ol>'; list = 'ol'; } out += '<li>' + inline(m[1]) + '</li>'; continue; }
+      if ((m = ln.match(/^>\s?(.*)/))) { flushP(); flushL(); out += '<blockquote>' + inline(m[1]) + '</blockquote>'; continue; }
+      flushL(); para.push(ln);
+    }
+    flushP(); flushL(); return out;
+  }
+  function md(src) {
+    const parts = String(src).split('```'); let h = '';
+    parts.forEach((p, i) => {
+      if (i % 2) {
+        const nl = p.indexOf('\n'); let lang = '', code = p;
+        if (nl > -1) { lang = p.slice(0, nl).trim(); code = p.slice(nl + 1); }
+        h += `<div class="code"><div class="code-h"><span>${esc(lang || 'code')}</span><button data-copy>Copy</button></div><pre><code>${esc(code.replace(/\n$/, ''))}</code></pre></div>`;
+      } else h += blocks(p);
+    });
+    return h;
+  }
+
+  /* ---------------- screens ---------------- */
+  function show(id) {
+    ['intro', 'auth', 'chat'].forEach(x => $('#' + x).classList.toggle('hidden', x !== id));
+  }
+  function overlayOpen(id) { $('#' + id).classList.add('on'); if (id !== 'upgrade') { } updateScrim(); }
+  function overlayClose(id) { $('#' + id).classList.remove('on'); updateScrim(); }
+  function updateScrim() { $('#scrim').classList.toggle('on', $('#drawer').classList.contains('on')); }
+  function topOverlay() {
+    for (const id of ['modal', 'upgrade', 'settings', 'drawer']) if ($('#' + id).classList.contains('on')) return id;
+    return null;
+  }
+  function closeTop() {
+    const t = topOverlay(); if (!t) return false;
+    if (t === 'modal') closeModal(); else overlayClose(t); return true;
+  }
+
+  /* ---------------- splash (5s) ---------------- */
+  function startSplash() {
+    const sp = $('#splash'); const t0 = Date.now();
+    sp.classList.add('run');
+    const done = () => {
+      const wait = Math.max(0, C.SPLASH_MS - (Date.now() - t0));
+      setTimeout(() => { sp.classList.add('out'); setTimeout(() => sp.remove(), 700); route(); }, wait);
+    };
+    done();
+  }
+
+  async function route() {
+    if (S.token && S.user) {
+      show('chat'); initChat();
+      refreshMe(true); autoUpdateCheck();
+    } else if (!LS.get('intro', false)) { show('intro'); }
+    else { show('auth'); }
+  }
+
+  /* ---------------- intro ---------------- */
+  let slide = 0;
+  function setSlide(n) {
+    slide = n; $$('.slide').forEach((s, i) => s.classList.toggle('on', i === n));
+    $$('.dots i').forEach((d, i) => d.classList.toggle('on', i === n));
+    $('#introNext').textContent = n === 2 ? 'Get started' : 'Next';
+  }
+  $('#introNext').onclick = () => { if (slide < 2) setSlide(slide + 1); else { LS.set('intro', true); show('auth'); } };
+  $('#introSkip').onclick = () => { LS.set('intro', true); show('auth'); };
+
+  /* ---------------- auth ---------------- */
+  function tab(up) {
+    $('#tabUp').classList.toggle('on', up); $('#tabIn').classList.toggle('on', !up);
+    $('#formUp').classList.toggle('hidden', !up); $('#formIn').classList.toggle('hidden', up);
+    $('#authSub').textContent = up ? 'Create your free account in seconds' : 'Welcome back — log in to continue';
+  }
+  $('#tabUp').onclick = () => tab(true); $('#tabIn').onclick = () => tab(false);
+  $$('[data-eye]').forEach(b => b.onclick = () => { const i = b.parentElement.querySelector('input'); i.type = i.type === 'password' ? 'text' : 'password'; });
+
+  function busyBtn(btn, on, label) {
+    btn.disabled = on; btn.innerHTML = on ? '<span class="spin"></span> Please wait…' : label;
+  }
+  function saveAuth() {
+    if (!S.token) return;
+    const st = S.keep ? LS : SESS, other = S.keep ? SESS : LS;
+    st.set('token', S.token); st.set('user', S.user); other.del('token'); other.del('user');
+  }
+  async function authDone(r, keep) {
+    S.token = r.token; S.user = r.user; S.keep = keep; saveAuth();
+    if (r.config) { S.cfg = r.config; LS.set('cfg', S.cfg); }
+    show('chat'); initChat(); refreshMe(true); autoUpdateCheck();
+  }
+  $('#formUp').onsubmit = async e => {
+    e.preventDefault(); const err = $('#errUp'); err.textContent = '';
+    const email = $('#suEmail').value.trim().toLowerCase(), username = $('#suUser').value.trim(), password = $('#suPass').value;
+    if (!/^[a-z0-9._%+-]+@gmail\.com$/.test(email)) return err.textContent = 'Please enter a valid Gmail address (name@gmail.com).';
+    if (!/^[A-Za-z0-9_.-]{3,20}$/.test(username)) return err.textContent = 'Username: 3–20 letters, numbers, . - or _';
+    if (password.length < 6) return err.textContent = 'Password must be at least 6 characters.';
+    busyBtn($('#btnUp'), true);
+    try {
+      const r = await api('signup', { email, username, password, invite: $('#suInv').value.trim(), keep: $('#suKeep').checked });
+      if (!r.ok) err.textContent = r.error || 'Could not sign up.'; else await authDone(r, $('#suKeep').checked);
+    } catch (x) { err.textContent = x.message; }
+    busyBtn($('#btnUp'), false, 'Create free account');
+  };
+  $('#formIn').onsubmit = async e => {
+    e.preventDefault(); const err = $('#errIn'); err.textContent = '';
+    const id = $('#liId').value.trim(), password = $('#liPass').value;
+    if (!id || !password) return err.textContent = 'Enter your Gmail/username and password.';
+    busyBtn($('#btnIn'), true);
+    try {
+      const r = await api('login', { id, password, keep: $('#liKeep').checked });
+      if (!r.ok) err.textContent = r.error || 'Could not log in.'; else await authDone(r, $('#liKeep').checked);
+    } catch (x) { err.textContent = x.message; }
+    busyBtn($('#btnIn'), false, 'Log in');
+  };
+
+  async function refreshMe(silent) {
+    try {
+      const r = await api('me');
+      if (r.ok) {
+        S.user = r.user; saveAuth(); if (r.config) { S.cfg = r.config; LS.set('cfg', S.cfg); }
+        if (S.user.plan !== 'free' && S.pendingPlan) { S.pendingPlan = null; LS.del('pending'); }
+        paintUser(); if (!silent) toast('Plan synced ✓'); return true;
+      }
+      if (r.error === 'SESSION') { logout(true); modal({ icon: '🔐', title: 'Session expired', text: 'Please log in again.' }); }
+    } catch (e) { if (!silent) toast(e.message); }
+    return false;
+  }
+  function logout(quiet) {
+    if (!quiet && S.token) api('logout').catch(() => { });
+    S.token = null; S.user = null; LS.del('token'); LS.del('user'); SESS.del('token'); SESS.del('user');
+    closeAll(); show('auth'); tab(false);
+  }
+  function closeAll() { ['settings', 'upgrade', 'drawer'].forEach(id => $('#' + id).classList.remove('on')); updateScrim(); }
+
+  /* ---------------- usage ---------------- */
+  function usage() {
+    const u = S.user || {}; let used = u.used || 0;
+    if (u.resetAt && Date.now() >= u.resetAt) { used = 0; }
+    const limit = u.limit || 5; return { used, limit, left: Math.max(0, limit - used), resetAt: used ? u.resetAt : null, plan: u.plan || 'free' };
+  }
+  function paintUser() {
+    const u = S.user; if (!u) return; const q = usage();
+    const pill = $('#pill'); $('#pillTxt').textContent = q.left + ' left';
+    pill.className = 'pill' + (q.plan === 'pro' ? ' pro' : '') + (q.left === 0 ? ' low' : '');
+    const initial = (u.username || 'S')[0].toUpperCase();
+    $('#dAv').textContent = initial; $('#sAv').textContent = initial; $('#dName').textContent = u.username;
+    $('#sName').textContent = u.username; $('#sMail').textContent = u.email;
+    const name = q.plan === 'pro' ? 'Pro' : q.plan === 'go' ? 'Go' : 'Free';
+    $('#dPlan').textContent = name + ' plan'; const b = $('#sBadge'); b.textContent = name; b.className = 'badge ' + q.plan;
+    $('#sBar').style.width = Math.min(100, (q.used / q.limit) * 100) + '%';
+    let t = q.used + ' of ' + q.limit + ' prompts used';
+    if (q.resetAt) t += ' · resets in ' + fmtLeft(q.resetAt - Date.now());
+    if (u.planExpiry) t += ' · plan valid until ' + new Date(u.planExpiry).toLocaleDateString();
+    $('#sUse').textContent = t;
+    $('#sInvite').textContent = u.inviteCode || '–'; $('#sVer').textContent = 'Version ' + C.APP_VERSION;
+    $('#btnUpgrade').textContent = q.plan === 'free' ? '⭐ Upgrade plan' : '⭐ Manage / renew plan';
+  }
+  setInterval(() => { if (S.user && !$('#chat').classList.contains('hidden')) paintUser(); }, 30000);
+
+  /* ---------------- chat ---------------- */
+  const STARTERS = [
+    ['💬', 'Smart Chat', 'Ask me anything', 'linear-gradient(135deg,#1e90ff,#2b57ff)', 'Hi SteveAI! Tell me something interesting I probably do not know.'],
+    ['⌨️', 'Code Assistant', 'Write & debug code', 'linear-gradient(135deg,#a24bff,#6a2cff)', 'Help me write a clean JavaScript function that debounces another function, and explain how it works.'],
+    ['📈', 'Data & Analysis', 'Insights & numbers', 'linear-gradient(135deg,#27d17f,#0a9b5a)', 'Explain how to analyse a sales dataset step by step: what to clean, what to calculate and which charts to make.'],
+    ['💡', 'Creative Ideas', 'Brainstorm anything', 'linear-gradient(135deg,#ffb41f,#ff7a00)', 'Give me 10 creative business ideas that a young engineer in Nigeria can start with little capital.'],
+    ['🌐', 'Web & Research', 'Summaries & facts', 'linear-gradient(135deg,#2aa8ff,#1b63ff)', 'Create a clear beginner roadmap for learning IoT and embedded systems, with free resources.'],
+    ['🚀', 'Task Automation', 'Plans & workflows', 'linear-gradient(135deg,#34d36b,#0aa04f)', 'Help me automate a weekly report using Google Sheets and Apps Script. Give the steps and code.']
+  ];
+  function curChat() { return S.chats.find(c => c.id === S.cur) || null; }
+  function saveChats() { S.chats = S.chats.slice(0, 40); LS.set('chats', S.chats); LS.set('cur', S.cur); }
+  function newChat() { S.cur = null; saveChats(); renderMsgs(); renderHist(); }
+  function initChat() { paintUser(); if (!curChat()) S.cur = null; renderMsgs(); renderHist(); }
+
+  function renderEmpty() {
+    const name = S.user ? S.user.username : '';
+    const el = document.createElement('div'); el.className = 'empty';
+    el.innerHTML = `<img src="assets/robot.png" alt=""><h2>Hi ${esc(name)} 👋</h2><p>Think • Ask • Create • Achieve</p><div class="chips"></div>`;
+    const grid = $('.chips', el);
+    STARTERS.forEach(s => {
+      const b = document.createElement('button'); b.className = 'chip';
+      b.innerHTML = `<span class="t" style="background:${s[3]}">${s[0]}</span><span><b>${s[1]}</b><small>${s[2]}</small></span>`;
+      b.onclick = () => { $('#inp').value = s[4]; autoGrow(); $('#inp').focus(); };
+      grid.appendChild(b);
+    });
+    return el;
+  }
+  function msgEl(m) {
+    const d = document.createElement('div');
+    if (m.role === 'user') { d.className = 'm u'; d.innerHTML = '<div class="b"></div>'; d.firstChild.textContent = m.text; }
+    else {
+      d.className = 'm a';
+      d.innerHTML = `<img class="av" src="assets/robot.png" alt=""><div class="col"><div class="b">${md(m.text)}</div><div class="acts"><button data-copymsg>⧉ Copy</button></div></div>`;
+      d._text = m.text;
+    }
+    return d;
+  }
+  function renderMsgs() {
+    const box = $('#msgs'); box.innerHTML = '';
+    const c = curChat();
+    if (!c || !c.messages.length) box.appendChild(renderEmpty());
+    else c.messages.forEach(m => box.appendChild(msgEl(m)));
+    box.scrollTop = box.scrollHeight;
+  }
+  function renderHist() {
+    const h = $('#hist'); h.innerHTML = '';
+    if (!S.chats.length) { h.innerHTML = '<div class="mut" style="padding:12px;font-size:14px">No chats yet.</div>'; return; }
+    S.chats.forEach(c => {
+      const d = document.createElement('div'); d.className = 'h' + (c.id === S.cur ? ' on' : '');
+      d.innerHTML = '<span></span><button aria-label="Delete">🗑</button>'; d.firstChild.textContent = c.title;
+      d.firstChild.onclick = () => { S.cur = c.id; saveChats(); renderMsgs(); renderHist(); overlayClose('drawer'); };
+      d.lastChild.onclick = ev => { ev.stopPropagation(); S.chats = S.chats.filter(x => x.id !== c.id); if (S.cur === c.id) S.cur = null; saveChats(); renderMsgs(); renderHist(); };
+      h.appendChild(d);
+    });
+  }
+  function autoGrow() { const t = $('#inp'); t.style.height = 'auto'; t.style.height = Math.min(140, t.scrollHeight) + 'px'; }
+  $('#inp').addEventListener('input', autoGrow);
+
+  function typingEl() {
+    const d = document.createElement('div'); d.className = 'm a'; d.id = 'typing';
+    d.innerHTML = '<img class="av" src="assets/robot.png" alt=""><div class="col"><div class="typing"><div class="d"><i></i><i></i><i></i></div><span id="tlabel">SteveAI is thinking…</span></div></div>';
+    const labels = ['SteveAI is thinking…', 'Working on your answer…', 'Almost there…']; let i = 0;
+    d._iv = setInterval(() => { i = (i + 1) % labels.length; const l = $('#tlabel'); if (l) l.textContent = labels[i]; }, 3500);
+    return d;
+  }
+  function addNotice(html) {
+    const box = $('#msgs'); const n = document.createElement('div'); n.innerHTML = html; const el = n.firstElementChild; box.appendChild(el);
+    box.scrollTop = box.scrollHeight; return el;
+  }
+
+  async function send() {
+    if (S.busy) return;
+    const inp = $('#inp'); const text = inp.value.trim(); if (!text) return;
+    const q = usage();
+    let c = curChat();
+    if (!c) { c = { id: uid(), title: text.slice(0, 38), ts: Date.now(), messages: [] }; S.chats.unshift(c); S.cur = c.id; }
+    $$('.notice').forEach(n => n.remove());
+    c.messages.push({ role: 'user', text }); saveChats();
+    inp.value = ''; autoGrow();
+    const box = $('#msgs'); if ($('.empty', box)) box.innerHTML = '';
+    box.appendChild(msgEl({ role: 'user', text }));
+    const ty = typingEl(); box.appendChild(ty); box.scrollTop = box.scrollHeight;
+    S.busy = true; $('#btnSend').disabled = true; renderHist();
+
+    const stop = () => { clearInterval(ty._iv); ty.remove(); S.busy = false; $('#btnSend').disabled = false; };
+    try {
+      const r = await api('chat', { messages: c.messages.map(m => ({ role: m.role, text: m.text })) });
+      stop();
+      if (r.ok) {
+        c.messages.push({ role: 'assistant', text: r.text }); saveChats();
+        S.user = Object.assign(S.user, { plan: r.plan, limit: r.limit, used: r.used, resetAt: r.resetAt }); saveAuth(); paintUser();
+        box.appendChild(msgEl({ role: 'assistant', text: r.text })); box.scrollTop = box.scrollHeight;
+      } else if (r.error === 'LIMIT') {
+        c.messages.pop(); saveChats();
+        S.user = Object.assign(S.user, { plan: r.plan, limit: r.limit, used: r.used, resetAt: r.resetAt }); saveAuth(); paintUser();
+        box.lastElementChild && box.lastElementChild.classList.contains('m') && box.lastElementChild.remove();
+        inp.value = text; autoGrow();
+        const el = addNotice(`<div class="notice"><h4>⏳ Prompt limit reached</h4><p>You have used all ${r.limit} prompts on the ${r.plan === 'free' ? 'Free' : r.plan.toUpperCase()} plan. Your quota refills in <b>${fmtLeft(r.resetAt - Date.now())}</b>. Upgrade to keep chatting now.</p><button class="btn gold">⭐ See plans</button></div>`);
+        $('button', el).onclick = openUpgrade;
+      } else if (r.error === 'SESSION') {
+        logout(true); modal({ icon: '🔐', title: 'Session expired', text: 'Please log in again.' });
+      } else {
+        c.messages.pop(); saveChats(); box.lastElementChild && box.lastElementChild.classList.contains('m') && box.lastElementChild.remove();
+        inp.value = text; autoGrow();
+        addNotice(`<div class="notice bad"><h4>⚠️ Something went wrong</h4><p>${esc(r.message || r.error || 'Please try again.')}</p></div>`);
+      }
+    } catch (e) {
+      stop(); c.messages.pop(); saveChats(); box.lastElementChild && box.lastElementChild.classList.contains('m') && box.lastElementChild.remove();
+      inp.value = text; autoGrow();
+      addNotice(`<div class="notice bad"><h4>⚠️ Couldn't reach SteveAI</h4><p>${esc(e.message)}</p></div>`);
+    }
+    box.scrollTop = box.scrollHeight;
+  }
+  $('#btnSend').onclick = send;
+  $('#inp').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)) { e.preventDefault(); send(); } });
+
+  // delegated clicks inside messages
+  $('#msgs').addEventListener('click', e => {
+    const cb = e.target.closest('[data-copy]');
+    if (cb) { copy(cb.closest('.code').querySelector('code').textContent); return; }
+    const cm = e.target.closest('[data-copymsg]');
+    if (cm) { copy(cm.closest('.m')._text || ''); return; }
+    const a = e.target.closest('a[data-ext]');
+    if (a) { e.preventDefault(); openExternal(a.getAttribute('href')); }
+  });
+
+  /* ---------------- drawer / settings buttons ---------------- */
+  $('#btnMenu').onclick = () => overlayOpen('drawer');
+  $('#scrim').onclick = () => overlayClose('drawer');
+  $('#btnNew').onclick = () => { newChat(); overlayClose('drawer'); };
+  $('#btnSet').onclick = () => { paintUser(); overlayOpen('settings'); };
+  $('#pill').onclick = () => { paintUser(); overlayOpen('settings'); };
+  $$('[data-close]').forEach(b => b.onclick = () => overlayClose(b.dataset.close));
+  $('#btnUpgrade').onclick = openUpgrade;
+  $('#btnOut').onclick = () => modal({ icon: '👋', title: 'Log out?', text: 'You can log back in with your Gmail or username.',
+    buttons: [{ label: 'Log out', cls: 'danger', fn: () => logout() }, { label: 'Cancel', cls: 'ghost' }] });
+  $('#rowClear').onclick = () => modal({ icon: '🧹', title: 'Clear chat history?', text: 'This removes saved chats from this device.',
+    buttons: [{ label: 'Clear', cls: 'danger', fn: () => { S.chats = []; S.cur = null; saveChats(); renderMsgs(); renderHist(); toast('Chats cleared'); } }, { label: 'Cancel', cls: 'ghost' }] });
+  $('#rowRefresh').onclick = () => refreshMe(false);
+  $('#rowInvite').onclick = () => {
+    const code = S.user && S.user.inviteCode; if (!code) return;
+    const msg = 'Join me on SteveAI — your all-in-one AI companion! Use my invite code ' + code + ' when you sign up.';
+    if (navigator.share) navigator.share({ title: 'SteveAI', text: msg }).catch(() => { }); else copy(msg);
+  };
+
+  /* ---------------- upgrade / payment ---------------- */
+  const PLAN_DEF = () => {
+    const c = S.cfg || { go_price: 10, pro_price: 20, free_limit: 5, go_limit: 40, pro_limit: 150, window_hours: 5 };
+    return [
+      { id: 'free', name: 'Free', price: 0, feats: [`${c.free_limit} prompts every ${c.window_hours} hours`, 'Smart chat & code help', 'Chat history on your device'] },
+      { id: 'go', name: 'Go', price: c.go_price, tag: 'POPULAR', feats: [`${c.go_limit} prompts every ${c.window_hours} hours`, 'Faster, longer answers', 'Everything in Free'] },
+      { id: 'pro', name: 'Pro', price: c.pro_price, feats: [`${c.pro_limit} prompts every ${c.window_hours} hours`, 'Most advanced AI model', 'Longest answers & priority use'] }
+    ];
+  };
+  let selPlan = null;
+  async function openUpgrade() {
+    overlayClose('settings'); selPlan = null; $('#payBox').innerHTML = '';
+    renderPlans(); overlayOpen('upgrade');
+    try { const r = await api('config'); if (r.ok) { S.cfg = r.config; LS.set('cfg', S.cfg); renderPlans(); } } catch (e) { }
+  }
+  function renderPlans() {
+    const cur = (S.user && S.user.plan) || 'free'; const box = $('#plans'); box.innerHTML = '';
+    PLAN_DEF().forEach(p => {
+      const b = document.createElement('button'); b.className = 'plan ' + p.id + (selPlan === p.id ? ' sel' : '');
+      b.innerHTML = `${p.tag ? '<span class="tag">' + p.tag + '</span>' : ''}<h3>${p.name} ${cur === p.id ? '<span class="cur">● Current</span>' : ''}</h3>
+        <div class="price">${p.price ? '$' + p.price : '$0'}<small>${p.price ? ' / month' : ' forever'}</small></div><ul>${p.feats.map(f => '<li>' + esc(f) + '</li>').join('')}</ul>`;
+      if (p.id !== 'free') b.onclick = () => { selPlan = p.id; renderPlans(); renderPay(p); };
+      box.appendChild(b);
+    });
+  }
+  function renderPay(p) {
+    const email = S.user.email; const cfg = S.cfg || {};
+    const pend = S.pendingPlan === p.id;
+    $('#payBox').innerHTML = `<div class="card pay" style="margin-top:16px">
+      <b style="font-size:18px">Pay $${p.price} for ${p.name}</b>
+      <div class="info">${esc(cfg.payment_info || 'Account number: 7040017142\nMOMO BANK or OPAY BANK\nAccount name: STEPHEN ADE')}</div>
+      <div class="mut" style="font-size:13.5px;margin-top:10px">⚠️ Use this Gmail as the payment <b>reference / remark</b> so we can find and activate you:</div>
+      <div class="remark"><b>${esc(email)}</b><button id="cpRemark">Copy</button></div>
+      <ol><li>Make the payment with the remark above.</li><li>Tap <b>“I have paid”</b>.</li><li>We confirm in the Google Sheet and activate your plan, then tap <b>Refresh my plan</b> in Settings.</li></ol>
+      ${cfg.payment_link ? '<button class="btn ghost" id="payLink" style="margin-bottom:10px">💳 Open payment link</button>' : ''}
+      <button class="btn gold" id="iPaid" ${pend ? 'disabled' : ''}>${pend ? '⏳ Awaiting confirmation' : "✅ I have paid"}</button></div>`;
+    $('#cpRemark').onclick = () => copy(email);
+    if (cfg.payment_link) $('#payLink').onclick = () => openExternal(cfg.payment_link);
+    $('#iPaid').onclick = async () => {
+      busyBtn($('#iPaid'), true);
+      try {
+        const r = await api('payRequest', { plan: p.id });
+        if (r.ok) { S.pendingPlan = p.id; LS.set('pending', p.id); modal({ icon: '🎉', title: 'Request received', text: r.message }); renderPay(p); }
+        else { modal({ icon: '⚠️', title: 'Could not send', text: r.message || r.error }); busyBtn($('#iPaid'), false, '✅ I have paid'); }
+      } catch (e) { modal({ icon: '⚠️', title: 'Network problem', text: e.message }); busyBtn($('#iPaid'), false, '✅ I have paid'); }
+    };
+    const pg = $('#upgrade'); pg.scrollTo({ top: pg.scrollHeight, behavior: 'smooth' });
+  }
+
+  /* ---------------- updates (GitHub Releases) ---------------- */
+  const vnum = v => String(v).replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0);
+  function newer(a, b) { const x = vnum(a), y = vnum(b); for (let i = 0; i < 3; i++) { if ((x[i] || 0) > (y[i] || 0)) return true; if ((x[i] || 0) < (y[i] || 0)) return false; } return false; }
+  async function checkUpdate(manual) {
+    if (manual) toast('Checking for updates…', 1800);
+    try {
+      const r = await fetch('https://api.github.com/repos/' + C.GITHUB_REPO + '/releases/latest', { headers: { Accept: 'application/vnd.github+json' } });
+      if (!r.ok) throw new Error('No release found yet');
+      const j = await r.json(); const latest = String(j.tag_name || '').replace(/^v/i, '');
+      const asset = (j.assets || []).find(a => /\.apk$/i.test(a.name));
+      if (latest && asset && newer(latest, C.APP_VERSION)) {
+        modal({ icon: '🚀', title: 'Update available · v' + latest, text: (j.body || 'A new version of SteveAI is ready.').slice(0, 600) + '\n\nTap Update, then open the downloaded file to install.',
+          buttons: [{ label: '⬇️ Update now', cls: 'gold', fn: () => openExternal(asset.browser_download_url) }, { label: 'Later', cls: 'ghost' }] });
+      } else if (manual) modal({ icon: '✅', title: "You're up to date", text: 'SteveAI v' + C.APP_VERSION + ' is the latest version.' });
+      LS.set('lastCheck', Date.now());
+    } catch (e) { if (manual) modal({ icon: '⚠️', title: 'Could not check', text: e.message + '. Make sure you are online and the GitHub repo is public.' }); }
+  }
+  function autoUpdateCheck() { if (Date.now() - LS.get('lastCheck', 0) > 12 * 3600000) checkUpdate(false); }
+  $('#rowUpdate').onclick = () => checkUpdate(true);
+
+  /* ---------------- native back button ---------------- */
+  const AppP = plugin('App');
+  if (AppP && AppP.addListener) {
+    AppP.addListener('backButton', () => { if (!closeTop()) { if (!$('#chat').classList.contains('hidden') && curChat()) newChat(); else AppP.exitApp && AppP.exitApp(); } });
+    AppP.addListener('resume', () => { if (S.token) { refreshMe(true); autoUpdateCheck(); } });
+  }
+
+  /* ---------------- boot ---------------- */
+  tab(true);
+  startSplash();
+})();

@@ -1,0 +1,17 @@
+{
+  "appId": "com.stevexa.steveai",
+  "appName": "SteveAI",
+  "webDir": "www",
+  "backgroundColor": "#050f33",
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0,
+      "launchAutoHide": true,
+      "backgroundColor": "#0a2ea8",
+      "showSpinner": false
+    }
+  }
+}
