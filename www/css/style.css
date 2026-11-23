@@ -219,3 +219,10 @@ button{cursor:pointer;border:0;background:none}
 .keep input{appearance:none;-webkit-appearance:none;width:22px;height:22px;border-radius:7px;border:1.5px solid var(--line);background:var(--card);display:grid;place-items:center;flex:none}
 .keep input:checked{background:var(--gold-grad);border-color:transparent}
 .keep input:checked::after{content:"✓";color:#241400;font-weight:900;font-size:14px}
+
+/* generated images */
+.gen{margin:2px 0 10px}
+.gen img{display:block;width:100%;max-width:420px;height:auto;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.04)}
+.genacts{margin-top:8px}
+.genacts button{padding:8px 14px;border-radius:12px;background:rgba(255,255,255,.08);border:1px solid var(--line);color:#fff;font-size:13px}
+.genold{margin:2px 0 8px;color:var(--mut);font-size:13px}
