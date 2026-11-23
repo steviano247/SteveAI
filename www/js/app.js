@@ -687,7 +687,7 @@
           buttons: [{ label: '⬇️ Update now', cls: 'gold', fn: () => openExternal(asset.browser_download_url) }, { label: 'Later', cls: 'ghost' }] });
       } else if (manual) modal({ icon: '✅', title: "You're up to date", text: 'SteveAI v' + C.APP_VERSION + ' is the latest version.' });
       LS.set('lastCheck', Date.now());
-    } catch (e) { if (manual) modal({ icon: '⚠️', title: 'Could not check', text: e.message + '. Make sure you are online, if yes then you app updated' }); }
+    } catch (e) { if (manual) modal({ icon: '⚠️', title: 'Could not check', text: e.message + '. Make sure you are online' }); }
   }
   function autoUpdateCheck() { if (Date.now() - LS.get('lastCheck', 0) > 12 * 3600000) checkUpdate(false); }
   $('#rowUpdate').onclick = () => checkUpdate(true);
