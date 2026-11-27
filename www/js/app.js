@@ -72,6 +72,13 @@
     } finally { clearTimeout(to); }
   }
 
+  /* ---------------- speed: wake the server early ---------------- */
+  let lastPing = 0;
+  function warm(force) {
+    if (!C.API_URL || C.API_URL.indexOf('PASTE_') === 0) return;
+    const n = Date.now(); if (!force && n - lastPing < 45000) return; lastPing = n;
+    try { fetch(C.API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'ping' }), redirect: 'follow' }).catch(() => { }); } catch (e) { }
+  }
   /* ---------------- markdown ---------------- */
   function inline(s) {
     s = esc(s);
@@ -275,9 +282,9 @@
     }
   }
   function saveChats() {
-    S.chats = S.chats.slice(0, 40); pruneImgs(6); pruneDocs(5);
+    S.chats = S.chats.slice(0, 40); pruneImgs(6); pruneDocs(5); pruneFiles(8);
     try { localStorage.setItem('sai_chats', JSON.stringify(S.chats)); }
-    catch (e) { pruneImgs(0); pruneDocs(0); try { localStorage.setItem('sai_chats', JSON.stringify(S.chats)); } catch (_) { } }
+    catch (e) { pruneImgs(0); pruneDocs(0); pruneFiles(0); try { localStorage.setItem('sai_chats', JSON.stringify(S.chats)); } catch (_) { } }
     LS.set('cur', S.cur);
   }
   const IMG_RE = /^\/(image|imagine|img|draw)\b|\b(generate|create|make|draw|design|paint|illustrate|render|produce|sketch|imagine|give me|show me|i want|i need|get me)\b[^.?!\n]{0,80}?\b(images?|pictures?|photos?|pics?|illustrations?|logos?|posters?|wallpapers?|artworks?|drawings?|paintings?|icons?|banners?|flyers?|thumbnails?|avatars?|portraits?|stickers?|cartoons?|mockups?|memes?|graphics?)\b|^\s*(please\s+)?(draw|sketch|paint|illustrate|imagine)\b/i;
@@ -309,6 +316,30 @@
       if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'SteveAI image' }); return; }
       const a = document.createElement('a'); a.href = src; a.download = name; document.body.appendChild(a); a.click(); a.remove(); toast('Saved ✓');
     } catch (e) { if (e && e.name === 'AbortError') return; toast('Could not save the image'); }
+  }
+  function fileExtIcon(n) { return /\.pdf$/i.test(n) ? '📄' : /\.(xlsx|csv)$/i.test(n) ? '📊' : /\.docx$/i.test(n) ? '📝' : '📎'; }
+  function fileSize(b64) { const n = Math.round(b64.length * 0.75 / 1024); return n < 1024 ? n + ' KB' : (n / 1024).toFixed(1) + ' MB'; }
+  async function saveFile(f) {
+    const FS = plugin('Filesystem'), SH = plugin('Share');
+    try {
+      if (FS && SH) {
+        const w = await FS.writeFile({ path: f.name, data: f.data, directory: 'CACHE' });
+        await SH.share({ title: f.name, url: w.uri, dialogTitle: 'Save or share file' });
+        return;
+      }
+      const bin = atob(f.data), u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      const blob = new Blob([u8], { type: f.mime }), file = new File([blob], f.name, { type: f.mime });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: f.name }); return; }
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
+    } catch (e) { if (e && e.name === 'AbortError') return; toast('Could not save the file'); }
+  }
+  // keep phone storage small: only the 8 newest files stay on the device
+  function pruneFiles(keep) {
+    for (const c of S.chats) for (let j = c.messages.length - 1; j >= 0; j--) {
+      const m = c.messages[j];
+      if (m.file) { if (keep-- <= 0) { delete m.file; m.fileGone = true; } }
+    }
   }
   function newChat() { S.cur = null; saveChats(); renderMsgs(); renderHist(); }
   function initChat() { paintUser(); if (!curChat()) S.cur = null; renderMsgs(); renderHist(); }
@@ -344,8 +375,10 @@
     else {
       d.className = 'm a';
       const pic = m.img ? `<div class="gen"><img src="${m.img}" alt="Generated image"><div class="genacts"><button data-saveimg>⬇ Save / Share</button></div></div>` : (m.imgGone ? '<div class="genold">🖼️ Image not stored on this device</div>' : '');
-      d.innerHTML = `<img class="av" src="assets/robot.png" alt=""><div class="col"><div class="b">${pic}${md(m.text)}</div><div class="acts"><button data-copymsg>⧉ Copy</button></div></div>`;
+      const card = m.file ? `<div class="filecard"><div class="fi">${fileExtIcon(m.file.name)}</div><div class="fn"><b>${esc(m.file.name)}</b><small>${fileSize(m.file.data)}</small></div><button data-savefile>⬇ Save</button></div>` : (m.fileGone ? '<div class="genold">📎 File not stored on this device. Ask me to create it again.</div>' : '');
+      d.innerHTML = `<img class="av" src="assets/robot.png" alt=""><div class="col"><div class="b">${card}${pic}${md(m.text)}</div><div class="acts"><button data-copymsg>⧉ Copy</button></div></div>`;
       d._text = m.text;
+      const sb = d.querySelector('[data-savefile]'); if (sb) sb.onclick = () => saveFile(m.file);
     }
     return d;
   }
@@ -401,6 +434,7 @@
     inp.value = ''; autoGrow(); pend = []; renderAtts(); closeAttMenu();
     const box = $('#msgs'); if ($('.empty', box)) box.innerHTML = '';
     box.appendChild(msgEl(um));
+    warm();
     const ty = typingEl(!sent.length && looksLikeImage(text)); box.appendChild(ty); box.scrollTop = box.scrollHeight;
     S.busy = true; $('#btnSend').disabled = true; renderHist();
 
@@ -411,6 +445,7 @@
       if (r.ok) {
         const am = { role: 'assistant', text: r.text };
         if (r.image && r.image.data) am.img = await shrinkImg('data:' + (r.image.mime || 'image/png') + ';base64,' + r.image.data, 1280, 0.88);
+        if (r.file && r.file.data) am.file = { name: r.file.name, mime: r.file.mime, data: r.file.data };
         c.messages.push(am); saveChats();
         S.user = Object.assign(S.user, { plan: r.plan, limit: r.limit, used: r.used, resetAt: r.resetAt }); saveAuth(); paintUser();
         box.appendChild(msgEl(am)); box.scrollTop = box.scrollHeight;
@@ -696,8 +731,14 @@
   const AppP = plugin('App');
   if (AppP && AppP.addListener) {
     AppP.addListener('backButton', () => { if (!closeTop()) { if (!$('#chat').classList.contains('hidden') && curChat()) newChat(); else AppP.exitApp && AppP.exitApp(); } });
-    AppP.addListener('resume', () => { if (S.token) { refreshMe(true); autoUpdateCheck(); } });
+    AppP.addListener('resume', () => { warm(true); if (S.token) { refreshMe(true); autoUpdateCheck(); } });
   }
+
+  /* ---------------- keep the server awake while the app is open ---------------- */
+  warm(true);                                              // as soon as the app starts (during the splash)
+  $('#inp').addEventListener('focus', () => warm());       // as soon as you tap the message box
+  setInterval(() => { if (!document.hidden && S.token) warm(true); }, 4 * 60000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) warm(); });
 
   /* ---------------- boot ---------------- */
   tab(true);

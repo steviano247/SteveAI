@@ -6,6 +6,6 @@ window.CONFIG = {
   GITHUB_REPO: 'steviano247/SteveAI',
   // ==================================
   APP_NAME: 'SteveAI',
-  APP_VERSION: '1.1.0', // kept in sync with package.json automatically by the GitHub build
+  APP_VERSION: '1.2.0', // kept in sync with package.json automatically by the GitHub build
   SPLASH_MS: 5000
 };

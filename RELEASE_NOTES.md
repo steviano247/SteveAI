@@ -1,4 +1,3 @@
-## What's new in 1.1.0
-- 📎 Attach button next to the message box: take a photo with the camera, pick a picture, or add a document
-- Reads images, PDFs, Word (.docx), PowerPoint (.pptx), Excel (.xlsx) and text/code files
-- SteveAI now runs only on Google Gemini and xAI Grok
+## What's new in 1.2.0
+- ⚡ Much faster replies: greetings are answered instantly, and the server is woken up the moment you open the app or tap the message box
+- ⬇ Created files (PDF, Word, Excel, CSV…) now show a Save button
