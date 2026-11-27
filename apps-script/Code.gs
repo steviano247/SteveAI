@@ -35,7 +35,8 @@ var SYSTEM_PROMPT_V2 = [
   '',
   'STYLE',
   '- Lead with the answer in the first line. No preamble, no "Great question", no restating the question.',
-  '- Keep it SHORT by default: 2-6 lines or a few tight bullets. Go deeper (full explanation, steps, theory) ONLY when the user says "go deeper", "explain more", "in detail", "step by step" or similar.',
+  '- Give a helpful, reasonably detailed answer by default: a clear explanation, the key points or steps, and a short example where it helps (roughly 8-20 lines). Never pad, never repeat yourself. For a simple greeting or a one-line question, reply briefly and naturally.',
+  '- If the user asks for a short or quick answer, keep it short. If they ask for "in detail", "step by step" or "full explanation", go as deep as needed.',
   '- Plain conversational language. Light emoji is fine, never excessive. Reply in the language the user writes in.',
   '- End with at most one short follow-up offer (e.g. "Want me to go deeper?") only when it genuinely helps.',
   '',
@@ -67,6 +68,9 @@ var SYSTEM_PROMPT_V2 = [
   '- Never say you cannot create images, and never answer an image request with code or SVG. If the user seems to want an image but you are replying in text, tell them to type: Generate an image of ... (or start the message with /image).',
   '- If an image request is too vague, ask ONE short question (style? colours? text on it?).',
   '',
+  'IDENTITY',
+  '- You are SteveAI, built by STEVEXA. Never say or hint which AI model, engine, company or platform runs you (never mention Gemini, Google, Grok, xAI, Groq, Llama, Meta, OpenAI, GPT, Anthropic, Claude or similar). If asked what model or technology powers you, say: "I\'m SteveAI, built by STEVEXA." and move on.',
+  '',
   'HONESTY',
   '- If unsure, say so briefly. Do not invent facts, sources, links or numbers. For live data (news, prices, scores) say you may not have the latest.',
   '- Be safe and respectful. Decline harmful requests in one polite line and offer a safer alternative.'
@@ -86,7 +90,7 @@ var DEFAULT_CFG = [
   ['payment_info', 'Account number: 7040017142\nBank: MOMO BANK or OPAY BANK (same number)\nAccount name: STEPHEN ADE',
     'Shown in the app on the payment screen. Edit freely.'],
   ['payment_link', '', 'Optional card/checkout link shown as a button (leave empty to hide)'],
-  ['system_prompt', SYSTEM_PROMPT_V2, 'Instruction given to the model on every chat (SteveAI v2 tuned: short answers, solved examples, no LaTeX, no unrequested code)'],
+  ['system_prompt', SYSTEM_PROMPT_V2, 'Instruction given to the model on every chat (SteveAI v2 tuned: detailed answers, solved examples, no LaTeX, no unrequested code)'],
   ['provider', 'auto', 'Chat engine: gemini | grok | groq | auto (auto = Gemini first, then Groq, then Grok). Grok needs an xai- key, Groq needs a gsk_ key in the ApiKeys sheet.'],
   ['groq_model', 'llama-3.3-70b-versatile', 'Groq model(s) for chat, comma-separated fallback order'],
   ['grok_model', 'grok-4', 'xAI Grok model(s) for chat, comma-separated fallback order'],
@@ -100,6 +104,9 @@ var DEFAULT_CFG = [
   ['image_cost', '2', 'How many prompts one generated image uses from the quota window'],
   ['image_plans', 'free,go,pro', 'Plans allowed to generate images (e.g. go,pro to make it a paid feature)'],
   ['fast_chat', 'on', 'on = every text-only message goes to Groq first when a gsk_ key exists (fastest), then Gemini, then Grok. Messages with an attached image/PDF go to Gemini first. off = always follow the provider order.'],
+  ['app_version', '', 'Latest app version for the in-app update check, e.g. 1.2.0 (leave empty to use the GitHub release instead)'],
+  ['app_url', '', 'Direct download link of the newest APK (any host: your website, Drive...). Opened when the user taps Update.'],
+  ['app_notes', '', 'Short "what is new" text shown in the update popup'],
   ['maintenance', 'off', 'Set to "on" to pause chat (shows a notice in the app)']
 ];
 
@@ -187,6 +194,7 @@ function doPost(e) {
       case 'payRequest': return json_(payRequest_(req));
       case 'logout': return json_(logout_(req));
       case 'config': return json_(publicConfig_());
+      case 'update': return json_(updateInfo_());
       case 'ping': warm_(); return json_({ ok: true, t: Date.now() });   // the app calls this when it opens / when you tap the message box, to wake the server early
       default: return json_({ ok: false, error: 'Unknown action' });
     }
@@ -194,6 +202,12 @@ function doPost(e) {
     console.error(err);
     return json_({ ok: false, error: 'Server error. Please try again.' });
   }
+}
+
+/** In-app "Check for updates": answered from the Config sheet (app_version, app_url, app_notes), so users never see where the file is hosted until they tap Update. */
+function updateInfo_() {
+  var c = config_();
+  return { ok: true, version: String(c.app_version || '').trim(), url: String(c.app_url || '').trim(), notes: String(c.app_notes || '').trim() };
 }
 
 function json_(o) {
@@ -1049,7 +1063,7 @@ function testFiles() {
  *  Old default prompts (and empty values) are upgraded automatically. */
 function systemPrompt_(cfg) {
   var p = String(cfg.system_prompt || '').trim();
-  if (!p || /Be concise unless the user asks for depth/.test(p) || p.indexOf('STEVEXA') === -1) return SYSTEM_PROMPT_V2;
+  if (!p || /Be concise unless the user asks for depth/.test(p) || /Keep it SHORT by default/.test(p) || p.indexOf('STEVEXA') === -1) return SYSTEM_PROMPT_V2;
   if (p === SYSTEM_PROMPT_V2) return p;
   return p + '\n\n' + SYSTEM_PROMPT_V2;   // keep admin text, but always enforce the v2 rules
 }

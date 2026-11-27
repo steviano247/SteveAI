@@ -691,7 +691,7 @@
       <div class="info">${esc(cfg.payment_info || 'Account number: 7040017142\nMOMO BANK or OPAY BANK\nAccount name: STEPHEN ADE')}</div>
       <div class="mut" style="font-size:13.5px;margin-top:10px">⚠️ Use this Gmail as the payment <b>reference / remark</b> so we can find and activate you:</div>
       <div class="remark"><b>${esc(email)}</b><button id="cpRemark">Copy</button></div>
-      <ol><li>Make the payment with the remark above.</li><li>Tap <b>“I have paid”</b>.</li><li>We confirm in the Google Sheet and activate your plan, then tap <b>Refresh my plan</b> in Settings.</li></ol>
+      <ol><li>Make the payment with the remark above.</li><li>Tap <b>“I have paid”</b>.</li><li>We confirm your payment and activate your plan, then tap <b>Refresh my plan</b> in Settings.</li></ol>
       ${cfg.payment_link ? '<button class="btn ghost" id="payLink" style="margin-bottom:10px">💳 Open payment link</button>' : ''}
       <button class="btn gold" id="iPaid" ${pend ? 'disabled' : ''}>${pend ? '⏳ Awaiting confirmation' : "✅ I have paid"}</button></div>`;
     $('#cpRemark').onclick = () => copy(email);
@@ -712,17 +712,23 @@
   function newer(a, b) { const x = vnum(a), y = vnum(b); for (let i = 0; i < 3; i++) { if ((x[i] || 0) > (y[i] || 0)) return true; if ((x[i] || 0) < (y[i] || 0)) return false; } return false; }
   async function checkUpdate(manual) {
     if (manual) toast('Checking for updates…', 1800);
+    const fail = () => { if (manual) modal({ icon: '⚠️', title: 'Could not check', text: 'Please make sure you are online and try again.' }); };
     try {
-      const r = await fetch('https://api.github.com/repos/' + C.GITHUB_REPO + '/releases/latest', { headers: { Accept: 'application/vnd.github+json' } });
-      if (!r.ok) throw new Error('No release found yet');
-      const j = await r.json(); const latest = String(j.tag_name || '').replace(/^v/i, '');
-      const asset = (j.assets || []).find(a => /\.apk$/i.test(a.name));
-      if (latest && asset && newer(latest, C.APP_VERSION)) {
-        modal({ icon: '🚀', title: 'Update available · v' + latest, text: (j.body || 'A new version of SteveAI is ready.').slice(0, 600) + '\n\nTap Update, then open the downloaded file to install.',
-          buttons: [{ label: '⬇️ Update now', cls: 'gold', fn: () => openExternal(asset.browser_download_url) }, { label: 'Later', cls: 'ghost' }] });
+      let latest = '', url = '', notes = '';
+      const u = await api('update').catch(() => null);          // answered by your own server: nothing about where the file is hosted
+      if (u && u.ok && u.version && u.url) { latest = String(u.version).replace(/^v/i, ''); url = u.url; notes = u.notes || ''; }
+      else if (C.GITHUB_REPO) {                                  // fallback while app_version / app_url are not set in the Config sheet
+        const r = await fetch('https://api.github.com/repos/' + C.GITHUB_REPO + '/releases/latest', { headers: { Accept: 'application/vnd.github+json' } });
+        if (!r.ok) throw new Error('x');
+        const j = await r.json(); const asset = (j.assets || []).find(a => /\.apk$/i.test(a.name));
+        if (asset) { latest = String(j.tag_name || '').replace(/^v/i, ''); url = asset.browser_download_url; notes = j.body || ''; }
+      }
+      if (latest && url && newer(latest, C.APP_VERSION)) {
+        modal({ icon: '🚀', title: 'Update available · v' + latest, text: (notes || 'A new version of SteveAI is ready.').slice(0, 600) + '\n\nTap Update, then open the downloaded file to install.',
+          buttons: [{ label: '⬇️ Update now', cls: 'gold', fn: () => openExternal(url) }, { label: 'Later', cls: 'ghost' }] });
       } else if (manual) modal({ icon: '✅', title: "You're up to date", text: 'SteveAI v' + C.APP_VERSION + ' is the latest version.' });
       LS.set('lastCheck', Date.now());
-    } catch (e) { if (manual) modal({ icon: '⚠️', title: 'Could not check', text: e.message + '. Make sure you are online' }); }
+    } catch (e) { fail(); }
   }
   function autoUpdateCheck() { if (Date.now() - LS.get('lastCheck', 0) > 12 * 3600000) checkUpdate(false); }
   $('#rowUpdate').onclick = () => checkUpdate(true);
